@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> 
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Mundial Familiar 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -338,8 +338,9 @@ var GOLEADORES = [
   "Bradley Barcola","Enzo Fernández","Hendrick","Rafinha"
 ];
 var GK = Object.keys(GRUPOS);
-var RONDAS = ["16vos de final","Cuartos de final","Semifinales","Final"];
-var MATCH_COUNT = [16,8,4,1];
+var RONDAS = ["16vos de final","Octavos de final","Cuartos de final","Semifinales","Final"];
+var MATCH_COUNT = [16,8,4,2,1];
+var R_CUARTOS = 2, R_SEMIS = 3; // índices usados para bonus de semifinalista/finalista
 
 // ═══════════════════════════════════════════════════════
 //  FIREBASE / FALLBACK LOCAL
@@ -470,32 +471,11 @@ async function guardarPerfil(){
   var nombre=document.getElementById('nombre-in').value.trim();
   if(!nombre){showToast('Ingresá tu nombre','e');return;}
   var goleador=document.getElementById('gol-sel').value;
-
-  // Buscar si ya existe un usuario con este nombre en Firebase
-  var meta=await fsGet('meta','users')||{list:[]};
-  var foundUid=null;
-  for(var i=0;i<meta.list.length;i++){
-    var u=await fsGet('users',meta.list[i]);
-    if(u&&u.nombre&&u.nombre.trim().toLowerCase()===nombre.trim().toLowerCase()){
-      foundUid=meta.list[i];
-      break;
-    }
-  }
-
-  // Si encontró un usuario existente, adoptá su userId
-  if(foundUid && foundUid!==userId){
-    userId=foundUid;
-    localStorage.setItem('wf26-uid',userId);
-    showToast('Cuenta recuperada ✓');
-  }
-
   userName=nombre; localStorage.setItem('wf26-name',nombre);
   if(goleador) localStorage.setItem('gol-'+userId,goleador);
-  await fsSet('users',userId,{nombre:nombre,goleador:goleador||''},true);
+  await fsSet('users',userId,{nombre:nombre,goleador:goleador,pts:0,exact:0,correct:0},true);
+  var meta=await fsGet('meta','users')||{list:[]};
   if(meta.list.indexOf(userId)===-1){meta.list.push(userId);await fsSet('meta','users',meta);}
-
-  // Cargar datos del usuario recuperado
-  await loadUserData();
   updateChip();
   document.getElementById('stats-card').style.display='block';
   updateStats();
@@ -717,6 +697,10 @@ async function saveElim(){
 // ═══════════════════════════════════════════════════════
 //  SCORING
 // ═══════════════════════════════════════════════════════
+function winnerOf(a,b,fallback){
+  a=parseInt(a); b=parseInt(b);
+  if(a>b) return 'a'; if(b>a) return 'b'; return fallback||null;
+}
 async function recalcUser(uid){
   var pts=0,exact=0,correct=0;
   var p=await fsGet('predictions',uid)||{};
@@ -732,6 +716,16 @@ async function recalcUser(uid){
     if(sc===5){pts+=5;exact++;}else if(sc===3){pts+=3;correct++;}
     if(ep[k]&&ep[k].pen&&re['pen_'+r+'_'+m]&&ep[k].pen===re['pen_'+r+'_'+m]) pts+=2;
   }});
+  // Bonus: semifinalista correcto (+4) y finalista correcto (+8)
+  [{r:R_CUARTOS,bonus:4},{r:R_SEMIS,bonus:8}].forEach(function(b){
+    for(var m=0;m<MATCH_COUNT[b.r];m++){
+      var k=b.r+'_'+m, pred=ep[k], real=re[k];
+      if(!pred||!real||real.a==null||real.b==null) continue;
+      var realWinner=winnerOf(real.a,real.b,re['winner_'+k]);
+      var predWinner=winnerOf(pred.a,pred.b,pred.pen);
+      if(realWinner&&predWinner&&realWinner===predWinner) pts+=b.bonus;
+    }
+  });
   if(ep.champion&&re.champion&&ep.champion===re.champion) pts+=15;
   var ud=await fsGet('users',uid)||{};
   if(ud.goleador&&re.goleador&&ud.goleador===re.goleador) pts+=10;
@@ -863,13 +857,22 @@ function renderAdminElim(){
       var cur=realElim[r+'_'+m]||{a:'',b:''};
       var tA=realElim['team_'+r+'_'+m+'_a']||'', tB=realElim['team_'+r+'_'+m+'_b']||'';
       var pen=realElim['pen_'+r+'_'+m]||'';
+      var et=!!realElim['et_'+r+'_'+m];
+      var win=realElim['winner_'+r+'_'+m]||'';
       html+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'+
+        '<div style="font-size:9px;color:var(--muted);margin-bottom:2px">Marcador 90\' (se usa para puntuar)</div>'+
         '<div style="display:grid;grid-template-columns:1fr 44px 12px 44px 1fr;gap:4px;margin-bottom:4px;align-items:center">'+
         '<input type="text" id="aet-'+r+'-'+m+'-a" value="'+tA+'" placeholder="Equipo A" style="padding:4px 8px;font-size:11px">'+
         '<input type="number" id="aer-'+r+'-'+m+'-a" value="'+(cur.a!==''?cur.a:'')+'" style="width:44px">'+
         '<span style="text-align:center;color:var(--muted);font-size:10px;font-weight:700">—</span>'+
         '<input type="number" id="aer-'+r+'-'+m+'-b" value="'+(cur.b!==''?cur.b:'')+'" style="width:44px">'+
         '<input type="text" id="aet-'+r+'-'+m+'-b" value="'+tB+'" placeholder="Equipo B" style="padding:4px 8px;font-size:11px">'+
+        '</div>'+
+        '<div class="pen-row"><span class="pl"><input type="checkbox" id="aet-et-'+r+'-'+m+'" '+(et?'checked':'')+' onchange="setAdminET('+r+','+m+',this.checked)"> Hubo prórroga</span></div>'+
+        '<div class="pen-row"><span class="pl">Avanzó:</span>'+
+        '<button class="pb2'+(win===''?' act':'')+'" onclick="setAdminWinner('+r+','+m+',\'\')">—</button>'+
+        '<button class="pb2'+(win==='a'?' act':'')+'" onclick="setAdminWinner('+r+','+m+',\'a\')">Eq A</button>'+
+        '<button class="pb2'+(win==='b'?' act':'')+'" onclick="setAdminWinner('+r+','+m+',\'b\')">Eq B</button>'+
         '</div>'+
         '<div class="pen-row"><span class="pl">Pen:</span>'+
         '<button class="pb2'+(pen===''?' act':'')+'" onclick="setAdminPen('+r+','+m+',\'\')">—</button>'+
@@ -883,6 +886,8 @@ function renderAdminElim(){
   document.getElementById('real-goleador').value=realElim.goleador||'';
 }
 function setAdminPen(r,m,val){ realElim['pen_'+r+'_'+m]=val; renderAdminElim(); }
+function setAdminET(r,m,val){ realElim['et_'+r+'_'+m]=val; }
+function setAdminWinner(r,m,val){ realElim['winner_'+r+'_'+m]=val; renderAdminElim(); }
 async function saveAdminElim(){
   RONDAS.forEach(function(_,r){ for(var m=0;m<MATCH_COUNT[r];m++){
     var va=document.getElementById('aer-'+r+'-'+m+'-a');
