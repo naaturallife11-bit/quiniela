@@ -490,6 +490,9 @@ async function guardarPerfil(){
     var ligaOld=localStorage.getItem('liga-'+oldUid);
     if(ligaOld){localStorage.setItem('liga-'+userId,ligaOld);localStorage.removeItem('liga-'+oldUid);}
     showToast('Bienvenido de nuevo, '+nombre+' ✓');
+    // Recargar para que toda la sesión use el uid correcto
+    localStorage.setItem('wf26-name', nombre);
+    setTimeout(function(){ location.reload(); }, 800);
   } else {
     // Usuario nuevo — registrar y guardar índice por nombre
     await fsSet('name-index',nombreKey,{uid:userId,nombre:nombre});
@@ -975,3 +978,4 @@ init();
 </script>
 </body>
 </html>
+
