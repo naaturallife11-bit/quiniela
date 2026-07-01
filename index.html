@@ -243,6 +243,7 @@ select option{background:#FFFFFF;color:#1A1A2E}
         <button class="btn" id="btn-le" onclick="toggleLock('elimLocked')" style="font-size:11px">🔒 Cerrar elim.</button>
         <button class="btn btn-g" id="btn-ee" onclick="enableElim()" style="font-size:11px;grid-column:span 2">🏆 Habilitar eliminatorias</button>
         <button class="btn btn-p" onclick="recalcAll()" style="font-size:11px;grid-column:span 2">⚡ Recalcular todos los puntos</button>
+        <button class="btn" onclick="seedNameIndex()" style="font-size:11px;grid-column:span 2;background:var(--blue);color:#fff">🔗 Indexar usuarios existentes</button>
       </div>
     </div>
     <div class="card">
@@ -471,6 +472,29 @@ async function guardarPerfil(){
   var nombre=document.getElementById('nombre-in').value.trim();
   if(!nombre){showToast('Ingresá tu nombre','e');return;}
   var goleador=document.getElementById('gol-sel').value;
+
+  // Buscar si ya existe un usuario con este nombre exacto en Firebase
+  var nombreKey='name_'+nombre.toLowerCase().replace(/\s+/g,'_');
+  var existing=await fsGet('name-index',nombreKey);
+
+  if(existing && existing.uid && existing.uid!==userId){
+    // Ya existe — cargar esa sesión en vez de crear duplicado
+    var oldUid=userId;
+    userId=existing.uid;
+    localStorage.setItem('wf26-uid',userId);
+    // Migrar localStorage del uid temporal al uid real
+    var avOld=localStorage.getItem('av-'+oldUid);
+    if(avOld){localStorage.setItem('av-'+userId,avOld);localStorage.removeItem('av-'+oldUid);}
+    var golOld=localStorage.getItem('gol-'+oldUid);
+    if(golOld){localStorage.setItem('gol-'+userId,golOld);localStorage.removeItem('gol-'+oldUid);}
+    var ligaOld=localStorage.getItem('liga-'+oldUid);
+    if(ligaOld){localStorage.setItem('liga-'+userId,ligaOld);localStorage.removeItem('liga-'+oldUid);}
+    showToast('Bienvenido de nuevo, '+nombre+' ✓');
+  } else {
+    // Usuario nuevo — registrar y guardar índice por nombre
+    await fsSet('name-index',nombreKey,{uid:userId,nombre:nombre});
+  }
+
   userName=nombre; localStorage.setItem('wf26-name',nombre);
   if(goleador) localStorage.setItem('gol-'+userId,goleador);
   await fsSet('users',userId,{nombre:nombre,goleador:goleador,pts:0,exact:0,correct:0},true);
@@ -731,6 +755,24 @@ async function recalcUser(uid){
   if(ud.goleador&&re.goleador&&ud.goleador===re.goleador) pts+=10;
   await fsSet('users',uid,{pts:pts,exact:exact,correct:correct},true);
   return {pts:pts,exact:exact,correct:correct};
+}
+
+async function seedNameIndex(){
+  var meta=await fsGet('meta','users')||{list:[]};
+  var count=0;
+  for(var i=0;i<meta.list.length;i++){
+    var uid=meta.list[i];
+    var ud=await fsGet('users',uid);
+    if(ud&&ud.nombre){
+      var key='name_'+ud.nombre.toLowerCase().replace(/\s+/g,'_');
+      var existing=await fsGet('name-index',key);
+      if(!existing){
+        await fsSet('name-index',key,{uid:uid,nombre:ud.nombre});
+        count++;
+      }
+    }
+  }
+  showToast('Indexados '+count+' usuarios ✓');
 }
 
 async function recalcAll(){
